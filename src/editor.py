@@ -46,6 +46,7 @@ from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFil
 
 # Global definitions
 REVEAL_SOUND_PATH = '../sounds/chaching.mp3'
+MONEY_SPENT_PATH = '../sounds/coin_drop.mp3'
 MAX_REVEALS = 10 # energy card doesn't count for this
 FRAME_SKIP = 3 # for video processing
 
@@ -54,6 +55,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Pokémon Pack Video Editor")
     parser.add_argument('--video',  required=True, help="Path to the input video")
     parser.add_argument('--set',    required=True, help="Name of the Pokémon card set")
+    parser.add_argument('--profit',   required=True, type=float, help="Total profit/loss")
     parser.add_argument('--cost',   required=True, type=float, help="Cost of the pack")
     parser.add_argument('--day',    required=True, type=int,   help="Day number")
     parser.add_argument(
@@ -299,7 +301,16 @@ def drawtext_filter(text, fontsize, color, xpos, ypos, enable):
         f"enable='{enable}'"
     )
     
-def create_text_clips(prices, all_timestamps, text_timing):
+def get_duration(video_path):
+    out = subprocess.check_output([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path
+    ]).decode().strip()
+    return float(out)
+    
+def create_text_clips(duration, day, total_profit, today_cost, prices, all_timestamps, text_timing):
     """
     Overlay `text` on an iPhone video without altering any picture data.
     We pull the source's color metadata with ffprobe, then ask ffmpeg
@@ -357,7 +368,7 @@ def create_text_clips(prices, all_timestamps, text_timing):
         )
     
     xpos_left = "200"
-    ypos_middle_top = "(h-text_h)/2-1200"
+    ypos_middle = "(h-text_h)/2"
     accumulating_prices = []
     running_total = 0
     for i, price in enumerate(prices):
@@ -368,13 +379,132 @@ def create_text_clips(prices, all_timestamps, text_timing):
                 fontsize=fontsize,
                 color="lightgreen",
                 xpos=xpos_left,
-                ypos=ypos_middle_top,
+                ypos=ypos_middle + "-1200",
                 enable=f"between(t,{all_timestamps[i*2]+text_timing[i*2]},{all_timestamps[i*2+1]+text_timing[i*2+1]})"
             )
         )
+        
+    title_font_size = 300
+    subtitle_font_size = 125
+    neg_sign = ""
+    total_profit_neg_sign = ""
+    total_color = "lightgreen"
+    signed_total_profit = total_profit
+    if total_profit < 0:
+        total_profit = abs(total_profit)
+        neg_sign = "-"
+        total_profit_neg_sign = "-"
+        total_color = "red"
+    beg_total = [
+        drawtext_filter(
+                text=f"Day ${day}",
+                fontsize=title_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-1000",
+                enable="between(t,0,3)"
+            ),
+        drawtext_filter(
+                text=f"Total profit/loss\\: {neg_sign}${total_profit:.2f}",
+                fontsize=subtitle_font_size,
+                color=total_color,
+                xpos=xpos_center,
+                ypos=ypos_middle + "-600",
+                enable="between(t,0,3)"
+            ),
+    ]
     
+    beg_today = [
+        drawtext_filter(
+                text=f"Day ${day}",
+                fontsize=title_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-1000",
+                enable="between(t,3,6)"
+            ),
+        drawtext_filter(
+                text=f"Today\u2019s cost\\: -${today_cost:.2f}",
+                fontsize=subtitle_font_size,
+                color="tomato",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-600",
+                enable="between(t,3,6)"
+            ),
+    ]
+    
+    neg_sign = ""
+    today_color = "lightgreen"
+    signed_today_profit = running_total - today_cost
+    if running_total - today_cost < 0:
+        today_profit = abs(running_total - today_cost)
+        neg_sign = "-"
+        today_color = "tomato"
+    end_today = [
+        drawtext_filter(
+                text=f"Day ${day}",
+                fontsize=title_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-1000",
+                enable=f"between(t,{duration - 5},{duration - 3})"
+            ),
+        drawtext_filter(
+                text=f"Today\u2019s profit/loss\\:",
+                fontsize=subtitle_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-600",
+                enable=f"between(t,{duration - 5},{duration - 3})"
+            ),
+        drawtext_filter(
+                text=f"-${today_cost:.2f} + ${running_total:.2f} = {neg_sign}${today_profit:.2f}",
+                fontsize=subtitle_font_size,
+                color=today_color,
+                xpos=xpos_center,
+                ypos=ypos_middle + "-400",
+                enable=f"between(t,{duration - 5},{duration - 3})"
+            ),
+    ]
+    
+    neg_sign = ""
+    sign = "+"
+    total_color = "lightgreen"
+    if signed_today_profit < 0:
+        sign = "-"
+    if signed_total_profit + signed_today_profit < 0:
+        total_profit = abs(signed_total_profit + signed_today_profit)
+        neg_sign = "-"
+        total_color = "tomato"
+    end_total = [
+        drawtext_filter(
+                text=f"Day ${day}",
+                fontsize=title_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-1000",
+                enable=f"between(t,{duration - 3},{duration})"
+            ),
+        drawtext_filter(
+                text=f"Total profit/loss\\:",
+                fontsize=subtitle_font_size,
+                color="white",
+                xpos=xpos_center,
+                ypos=ypos_middle + "-600",
+                enable=f"between(t,{duration - 3},{duration})"
+            ),
+        drawtext_filter(
+                text=f"{total_profit_neg_sign}${total_profit:.2f} {sign} ${today_profit:.2f} = {neg_sign}${total_profit:.2f}",
+                fontsize=subtitle_font_size,
+                color=total_color,
+                xpos=xpos_center,
+                ypos=ypos_middle + "-400",
+                enable=f"between(t,{duration - 3},{duration})"
+            ),
+    ]
+        
     draw = []
-    draw = ",".join(individual_prices + accumulating_prices)
+    draw = ",".join(individual_prices + accumulating_prices + beg_total + beg_today + end_today + end_total)
     
     return draw
 
@@ -427,6 +557,7 @@ def create_audio_clips_command(input_video, prices, all_timestamps, text_timing)
     # Add an SFX input for each timestamp
     for _ in prices:
         cmd += ["-i", REVEAL_SOUND_PATH]
+    cmd += ["-i", MONEY_SPENT_PATH]  # the money spent sound
 
     # Filter complex parts
     filter_lines = []
@@ -435,20 +566,24 @@ def create_audio_clips_command(input_video, prices, all_timestamps, text_timing)
         # SFX inputs start at 1 (0 is the main video)
         delay_ms = int((all_timestamps[i*2] + text_timing[i*2] + audio_timing) * 1000)
         filter_lines.append(f"[{i+1}]adelay={delay_ms}|{delay_ms}[sfx{i+1}]")
+    filter_lines.append("[12]adelay=3000|3000[sfx12]") # the money spent sound
+    
     # Now build amix
-    sfx_labels = ''.join(f"[sfx{i+1}]" for i in range(len(prices)))
-    amix_inputs = len(prices) + 1  # 1 for main audio + N SFX
+    sfx_labels = ''.join(f"[sfx{i+1}]" for i in range(len(prices) + 1))
+    amix_inputs = len(prices) + 2  # 1 for main audio + N SFX, 1 for the money spent sound
     filter_lines.append(f"[0:a]{sfx_labels}amix=inputs={amix_inputs}:normalize=0[aout]")
     # Reduce volume of all sounds audio by 30dB
     filter_lines.append(f"[aout]volume=-30dB[aout2]")
     
-    print("filter_lines:", filter_lines)
+    # print("filter_lines:", filter_lines)
     
     filter_complex = ";".join(filter_lines)
     
+    print(cmd)
+    
     return cmd, filter_complex
 
-def overlay_text_and_audio(input_video, timestamps, prices, output_path):
+def overlay_text_and_audio(input_video, day, total_profit, today_cost, timestamps, prices, output_path):
     # ------------------------------------------------------------------
     # 1.  Read the source-file color tags so we can copy them verbatim
     # ------------------------------------------------------------------
@@ -466,18 +601,35 @@ def overlay_text_and_audio(input_video, timestamps, prices, output_path):
     
     # video = VideoFileClip(input_video)
     # w, h = video.w, video.h
-    text_timing = [ -0.5, 1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  1.0, 
-                    1.0,  4.0, 
-                    4.0,  8.0,
+    # text_timing = [ -0.5, 1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  1.0, 
+    #                 1.0,  4.0, 
+    #                 4.0,  7.0,
+    # ]
+    
+    duration = get_duration(input_video)
+    print(f"Video duration: {duration:.2f} seconds")
+    
+    text_timing = [ -1.5, 0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0, 
+                    0.0,  0.0,
+                    0.0,  0.0,
     ]
+    
     all_timestamps = [ timestamps[0], timestamps[0], 
                        timestamps[0], timestamps[1], 
                        timestamps[1], timestamps[2], 
@@ -488,9 +640,11 @@ def overlay_text_and_audio(input_video, timestamps, prices, output_path):
                        timestamps[6], timestamps[7],
                        timestamps[7], timestamps[8],
                        timestamps[8], timestamps[9],
-                       timestamps[9], timestamps[9],
+                       timestamps[9], duration - 5, # -5 seconds to make space for the end totals
     ]
-    text_clips  = create_text_clips(prices, text_timing, all_timestamps)
+    print(f"all_timestamps: {all_timestamps}")
+    
+    text_clips  = create_text_clips(duration, day, total_profit, today_cost, prices, text_timing, all_timestamps)
     # audio_clips = create_audio_clips(timestamps)
 
     # Composite audio
@@ -569,7 +723,7 @@ def main():
     
     output_path = raw_mp4.replace("raw_vids","edited_vids")
     print("Started overlaying text & sound.")
-    overlay_text_and_audio(raw_mp4, timestamps, prices_list, output_path)
+    overlay_text_and_audio(raw_mp4, args.day, args.profit, args.cost, timestamps, prices_list, output_path)
     print("Finished overlaying text & sound.")
     
     print(f"\nFinished editing Day {args.day}.")
