@@ -685,7 +685,7 @@ def overlay_text_and_audio(input_video, day, total_profit, today_cost, timestamp
         "-c:v", codec,
         "-pix_fmt", pix_fmt,
         "-preset", "ultrafast",
-        "-crf", "35",
+        "-crf", "23",
         # "-c:a", "copy",   # removed this
         # Color tags as before
         "-colorspace", csp,
